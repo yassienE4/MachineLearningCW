@@ -9,8 +9,6 @@ from pathlib import Path
 import pandas as pd
 import requests
 from bs4 import BeautifulSoup, SoupStrainer
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
 
 
 BASE_URL = "https://eg.hatla2ee.com/en/car/search"
@@ -18,15 +16,6 @@ FUEL_TYPES = ["gas", "diesel", "natural gas", "electric", "hybrid"]
 PROPERTIES = ["brand", "model", "color", "class", "km", "city"]
 FUEL_LABELS = {"gas", "diesel", "natural gas", "electric", "hybrid"}
 TRANSMISSIONS = {"automatic", "manual"}
-REQUEST_HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/140.0.0.0 Safari/537.36"
-    ),
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-    "Accept-Language": "en-US,en;q=0.9",
-}
 
 
 def _clean_text(value: str | None) -> str:
@@ -82,32 +71,8 @@ def _append_rows(output_path: Path, rows: list[dict]) -> None:
 
 def get_page(session: requests.Session, url: str) -> BeautifulSoup:
     response = session.get(url, timeout=30)
-    if response.status_code == 403:
-        raise PermissionError(
-            "Hatla2ee rejected the request (HTTP 403). Wait a few minutes before "
-            "trying again; repeated immediate retries can prolong the block."
-        )
     response.raise_for_status()
     return BeautifulSoup(response.text, "html.parser")
-
-
-def _create_session() -> requests.Session:
-    """Create a polite browser-like session with retries for transient failures."""
-    session = requests.Session()
-    session.headers.update(REQUEST_HEADERS)
-    retries = Retry(
-        total=3,
-        connect=3,
-        read=3,
-        status=3,
-        backoff_factor=1,
-        status_forcelist=(429, 500, 502, 503, 504),
-        allowed_methods=frozenset({"GET"}),
-        respect_retry_after_header=True,
-    )
-    adapter = HTTPAdapter(max_retries=retries)
-    session.mount("https://", adapter)
-    return session
 
 
 def _pages_count(soup: BeautifulSoup) -> int:
@@ -190,7 +155,7 @@ def _parse_listing(card: BeautifulSoup, fuel: str) -> dict | None:
 
 
 def scrape_cars(output_dir: str = "cars_raw_data") -> Path:
-    session = _create_session()
+    session = requests.Session()
     output_path = _output_path(output_dir)
     checkpoint_path = _checkpoint_path(output_path)
     checkpoint = _load_checkpoint(checkpoint_path)
@@ -200,7 +165,7 @@ def scrape_cars(output_dir: str = "cars_raw_data") -> Path:
     total_saved = len(seen_ids)
 
     for index, fuel in enumerate(FUEL_TYPES[start_fuel_index:], start=start_fuel_index):
-        url = f"{BASE_URL}?fuel={index + 1}&page=1"
+        url = f"{BASE_URL}?fuel={index + 1}&page="
         soup = get_page(session, url)
         pages_no = _pages_count(soup)
         page_start = start_page if index == start_fuel_index else 1
