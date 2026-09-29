@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pandas as pd
 import requests
-from bs4 import BeautifulSoup, SoupStrainer
+from bs4 import BeautifulSoup
 
 
 BASE_URL = "https://eg.hatla2ee.com/en/car/search"
@@ -16,6 +16,15 @@ FUEL_TYPES = ["gas", "diesel", "natural gas", "electric", "hybrid"]
 PROPERTIES = ["brand", "model", "color", "class", "km", "city"]
 FUEL_LABELS = {"gas", "diesel", "natural gas", "electric", "hybrid"}
 TRANSMISSIONS = {"automatic", "manual"}
+REQUEST_HEADERS = {
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+    "User-Agent": (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/128.0.0.0 Safari/537.36"
+    ),
+}
 
 
 def _clean_text(value: str | None) -> str:
@@ -71,6 +80,13 @@ def _append_rows(output_path: Path, rows: list[dict]) -> None:
 
 def get_page(session: requests.Session, url: str) -> BeautifulSoup:
     response = session.get(url, timeout=30)
+    if response.status_code == requests.codes.forbidden:
+        ray_id = response.headers.get("cf-ray", "unknown")
+        raise RuntimeError(
+            "Hatla2ee/Cloudflare rejected this request (HTTP 403; "
+            f"Ray ID: {ray_id}). The site must allow this session or IP "
+            "before scraping can continue."
+        )
     response.raise_for_status()
     return BeautifulSoup(response.text, "html.parser")
 
@@ -156,6 +172,7 @@ def _parse_listing(card: BeautifulSoup, fuel: str) -> dict | None:
 
 def scrape_cars(output_dir: str = "cars_raw_data") -> Path:
     session = requests.Session()
+    session.headers.update(REQUEST_HEADERS)
     output_path = _output_path(output_dir)
     checkpoint_path = _checkpoint_path(output_path)
     checkpoint = _load_checkpoint(checkpoint_path)
@@ -165,14 +182,15 @@ def scrape_cars(output_dir: str = "cars_raw_data") -> Path:
     total_saved = len(seen_ids)
 
     for index, fuel in enumerate(FUEL_TYPES[start_fuel_index:], start=start_fuel_index):
-        url = f"{BASE_URL}?fuel={index + 1}&page="
+        page_start = start_page if index == start_fuel_index else 1
+        url = f"{BASE_URL}?fuel={index + 1}&page={page_start}"
         soup = get_page(session, url)
         pages_no = _pages_count(soup)
-        page_start = start_page if index == start_fuel_index else 1
 
         for page in range(page_start, pages_no + 1):
-            url = f"{BASE_URL}?fuel={index + 1}&page={page}"
-            soup = get_page(session, url)
+            if page != page_start:
+                url = f"{BASE_URL}?fuel={index + 1}&page={page}"
+                soup = get_page(session, url)
             car_list = soup.find_all(attrs={"class": "newCarListUnit_data_wrap"})
             if not car_list:
                 car_list = soup.select('div[data-slot="card"]')

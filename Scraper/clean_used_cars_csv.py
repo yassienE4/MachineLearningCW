@@ -25,6 +25,9 @@ DEFAULT_COLUMNS = [
 
 
 def _read_cars_csv(path: Path) -> pd.DataFrame:
+    if not path.exists() or path.stat().st_size == 0:
+        raise ValueError(f"Raw cars CSV is missing or empty: {path}")
+
     first_line = path.read_text(encoding="utf-8", errors="ignore").splitlines()[0].strip()
     columns_in_file = [part.strip() for part in first_line.split(",")]
 
@@ -51,6 +54,7 @@ def clean_cars(input_path: Path, output_path: Path) -> pd.DataFrame:
         df = df.drop_duplicates(subset=["id"])
 
     df = df.reset_index(drop=True)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
     df.to_csv(output_path, index=False)
     return df
 
