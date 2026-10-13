@@ -17,7 +17,6 @@
 │   │   └── 2026-05-25_used_cars_preprocessed.csv
 │   └── raw/
 │       ├── 2026-05-25_used_cars_raw.csv
-│       ├── 2026-10-13_used_cars_raw.checkpoint.json
 │       └── 2026-10-13_used_cars_raw.csv
 ├── Notebooks/
 │   └── phase1/
