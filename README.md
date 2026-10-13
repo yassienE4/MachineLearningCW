@@ -1,8 +1,5 @@
 # Used-car price predictor
 
-# Report 
-https://docs.google.com/document/d/1_rCFU-IILV4kVCQJ18vApwdzbtKtJwQxcSWbjcWmbBM/edit?usp=sharing
-
 ```
 ├── Data/
 │   ├── clean/
