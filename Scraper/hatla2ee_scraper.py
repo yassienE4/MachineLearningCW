@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
-from datetime import datetime
+from datetime import date
 from pathlib import Path
 
 import pandas as pd
@@ -31,9 +31,15 @@ def _clean_text(value: str | None) -> str:
     return value.strip() if value else ""
 
 
-def _output_path(output_dir: str) -> Path:
-    now = datetime.now()
-    file_name = f"{now:%d-%m-%Y}.csv"
+def _output_path(output_dir: str, snapshot_date: str | None = None) -> Path:
+    """Return the date-versioned raw-data path for a collection run."""
+    if snapshot_date is None:
+        snapshot_date = date.today().isoformat()
+    else:
+        # Validate the naming date early and keep every output ISO sortable.
+        date.fromisoformat(snapshot_date)
+
+    file_name = f"{snapshot_date}_used_cars_raw.csv"
     path = Path(output_dir)
     path.mkdir(parents=True, exist_ok=True)
     return path / file_name
@@ -170,10 +176,10 @@ def _parse_listing(card: BeautifulSoup, fuel: str) -> dict | None:
     return dict(zip(keys, values))
 
 
-def scrape_cars(output_dir: str = "cars_raw_data") -> Path:
+def scrape_cars(output_dir: str = "cars_raw_data", snapshot_date: str | None = None) -> Path:
     session = requests.Session()
     session.headers.update(REQUEST_HEADERS)
-    output_path = _output_path(output_dir)
+    output_path = _output_path(output_dir, snapshot_date)
     checkpoint_path = _checkpoint_path(output_path)
     checkpoint = _load_checkpoint(checkpoint_path)
     seen_ids = _load_seen_ids(output_path)
@@ -226,10 +232,14 @@ def scrape_cars(output_dir: str = "cars_raw_data") -> Path:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Scrape Hatla2ee used car listings into CSV.")
     parser.add_argument("--output-dir", default="cars_raw_data", help="Directory to write the CSV file")
+    parser.add_argument(
+        "--snapshot-date",
+        help="Collection date in YYYY-MM-DD format (defaults to today)",
+    )
     parser.add_argument("--reset", action="store_true", help="Ignore any saved checkpoint and start over")
     args = parser.parse_args()
 
-    output_path = _output_path(args.output_dir)
+    output_path = _output_path(args.output_dir, args.snapshot_date)
     checkpoint_path = _checkpoint_path(output_path)
 
     if args.reset:
@@ -238,7 +248,7 @@ def main() -> None:
         if checkpoint_path.exists():
             checkpoint_path.unlink()
 
-    final_path = scrape_cars(args.output_dir)
+    final_path = scrape_cars(args.output_dir, args.snapshot_date)
     saved_rows = 0
     if final_path.exists() and final_path.stat().st_size > 0:
         saved_rows = len(pd.read_csv(final_path))
