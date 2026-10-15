@@ -1,6 +1,5 @@
 # Used-car price predictor
 
-
 ```
 ├── Data/
 │   ├── clean/
