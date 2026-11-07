@@ -1,27 +1,21 @@
 # Used-car price predictor
 
+Predicting the advertised price (EGP) of used cars in Egypt, as a regression problem.
+
+- **Dataset source:** listings scraped from Hatla2ee, https://eg.hatla2ee.com/en/car/search
+- **Dataset files:** `Data/raw/` (scraper output) and `Data/clean/` (de-duplicated). The results use the `2026-10-13` snapshot.
+- **Notebook:** [`Notebooks/used_car_price_prediction.ipynb`](Notebooks/used_car_price_prediction.ipynb), the end-to-end pipeline: data collection, EDA, preprocessing, K-Means feature engineering, model training, hyperparameter tuning and evaluation.
+
 ```
 ├── Data/
 │   ├── clean/
 │   │   └── Date_used_cars_cleaned.csv
-│   ├── model_ready/
-│   │   └── Date/
-│   │       ├── used_cars_feature_names.csv
-│   │       ├── used_cars_preprocessing_pipeline.joblib
-│   │       ├── used_cars_x_test.npz
-│   │       ├── used_cars_x_train.npz
-│   │       ├── used_cars_y_test.csv
-│   │       └── used_cars_y_train.csv
-│   ├── preprocessed/
-│   │   └── Date_used_cars_preprocessed.csv
 │   └── raw/
 │       └── Date_used_cars_raw.csv
 ├── Notebooks/
-│   └── phase1/
-│       ├── data_collection.ipynb
-│       ├── exploratory_data_analysis.ipynb
-│       ├── model_preparation.ipynb
-│       └── preprocessing.ipynb
+│   └── used_car_price_prediction.ipynb
+├── Report/
+│   └── Draft1/
 ├── Scraper/
 │   ├── clean_used_cars_csv.py
 │   └── hatla2ee_scraper.py

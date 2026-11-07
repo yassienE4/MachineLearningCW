@@ -1,13 +1,11 @@
 \section{Introduction}
 This project explores predicting used car prices in Egypt using supervised machine learning~\citep{project-repository}. Having a clear, accurate price estimate helps buyers, sellers, and online platforms navigate the market with reliable, data-backed vehicle valuations. Because advertised car prices are continuous values measured in Egyptian pounds (EGP), we treat this task as a regression problem.
 
-The dataset was built by scraping listings directly from Hatla2ee. After initial cleaning, the snapshot contains 14,556 used car listings, capturing key details such as model year, mileage, transmission type, fuel type, brand, model, and location. The advertised price serves as the target variable. While listing IDs and digital fingerprints are retained for validation and traceability, they are excluded as predictive features.
-
-To customize the dataset for this study, I drew an 80\% simple random sample without replacement, using my TKH Student ID (2300632) as a fixed random seed. This created a reproducible working set of 11,645 listings. Following data preparation, this tailored dataset forms the foundation for training, comparing, and evaluating our regression models.
+The dataset was built by scraping listings directly from Hatla2ee. After initial cleaning, the snapshot contains 14,556 used car listings, capturing key details such as model year, mileage, transmission type, fuel type, brand, model, and location. The advertised price serves as the target variable. While listing IDs and digital fingerprints are retained for validation and traceability, they are excluded as predictive features. After data preparation, 14,487 listings form the dataset used to train, compare, and evaluate the regression models.
 
 \section{Data Preparation}
-Before drawing the working sample, I ran an initial exploratory data analysis (EDA) on the full 14,556-listing snapshot. This provided a detailed look at the dataset's overall characteristics and highlighted raw data quality issues. The analysis examined data types, missing values, feature cardinality, duplicate records, numerical distributions, category frequencies, and how potential predictors correlate with price.
-The raw dataset contained no exact duplicate rows, listing IDs, or fingerprints. However, three features, ad\_date, color, and class, suffered from missing values and lacked predictive value, so they were removed. Visualizations and summary statistics showed that prices were heavily right-skewed, while year, mileage, brand, model, fuel type, transmission, and location stood out as strong potential predictors. Text-based mileage values, such as “30,000 KM,” were parsed and converted into a clean numerical column named mileage\_km.
+I first ran an exploratory data analysis (EDA) on the full 14,556-listing snapshot. This provided a detailed look at the dataset's overall characteristics and highlighted raw data quality issues. The analysis examined data types, missing values, feature cardinality, duplicate records, numerical distributions, category frequencies, and how potential predictors correlate with price.
+The raw dataset contained no exact duplicate rows, listing IDs, or fingerprints. However, three features, ad\_date, color, and class, were entirely missing and therefore had no predictive value, so they were removed. Visualizations and summary statistics showed that prices were heavily right-skewed, while year, mileage, brand, model, fuel type, transmission, and location stood out as strong potential predictors. Text-based mileage values, such as ``30,000 KM'', were parsed and converted into a clean numerical column named mileage\_km.
 
 See Figure~\ref{fig:numerical-distributions}.
 
@@ -18,18 +16,179 @@ See Figure~\ref{fig:numerical-distributions}.
 \label{fig:numerical-distributions}
 \end{figure}
 
-Once the initial EDA was complete, I generated the personalized dataset by sampling 80\% of the cleaned listings without replacement using Student ID 2300632 as the seed. The resulting working set contains 11,645 listings. Because the sampling method is deterministic, re-running the process with the same seed will reproduce this exact working set.
+Next, I applied strict data validation rules. I filtered out listings with missing mileage or extreme values of 1,000,000 km or higher, as well as model years outside a realistic 1950--2026 range. Prices were required to be positive and below 100,000,000 EGP (all listings met this condition). In total, 41 records failed the mileage check and 29 failed the year check; accounting for overlap, 69 records were removed, leaving 14,487 listings for modeling.
 
-Next, I applied strict data validation rules to the working sample. I filtered out listings missing mileage or reporting extreme values of 1,000,000 km or higher, as well as model years outside a realistic 1950–2026 range. Prices were required to be positive and below 100,000,000 EGP (all sampled listings met this price condition). In total, 33 records failed the mileage check and 23 failed the year check; accounting for overlap, 56 records were removed, leaving 11,589 listings for modeling.
-
-Categorical features were standardized before modeling. Fuel entries were mapped into consistent categories, transmission types were grouped into Automatic, Manual, or Unknown, and cities were mapped to their broader governorates. Unmapped locations were retained as “Other / Unmapped” rather than removed. Finally, the title text was dropped because it redundantly repeated brand, model, and year info, while id and fingerprint were excluded from modeling as they represent unique listing identifiers rather than vehicle characteristics.
+Categorical features were standardized before modeling. Fuel entries were mapped into consistent categories, transmission types were grouped into Automatic, Manual, or Unknown, and cities were mapped to their broader governorates. Unmapped locations were retained as ``Other / Unmapped'' rather than removed. Finally, the title text was dropped because it repeated the brand, model, and year information, while id and fingerprint were excluded from modeling because they identify listings rather than describe vehicles.
 
 To prevent data leakage, transformations like imputation, scaling, and encoding are fitted strictly after splitting the data into training and test sets. Numerical features undergo median imputation followed by standardization, while categorical features use most-frequent-value imputation and one-hot encoding. This workflow ensures that test set information never influences the transformations learned during training.
 
+\section{Implementation}
+\subsection{Experimental protocol}
+The 14,487 listings were split 80/20 into training (11,589) and test (2,898) sets, stratified by price decile with a fixed seed of 42. The test set was used only once, for the final evaluation. Every modelling decision was made with shuffled 5-fold cross-validation (CV) on the training set~\citep{kohavi1995}. Each model is a single scikit-learn~\citep{pedregosa2011} pipeline (Snippet~\ref{lst:pipeline}), so imputation, scaling, encoding, and clustering are re-fitted inside every fold. Mean absolute error (MAE) was chosen as the primary selection metric because it reads directly as the typical pricing error in EGP and is less dominated than RMSE by the few luxury cars. RMSE, $R^2$, and MAPE are reported alongside it.
+
+\begin{lstlisting}[language=Python, caption={Model construction (abridged from the notebook).}, label={lst:pipeline}]
+def build_model(regressor, log_target, use_clusters=True):
+    pipeline = Pipeline([('preprocess', build_preprocessor(use_clusters)),
+                         ('model', regressor)])
+    if log_target:  # train on log(price), predict in EGP
+        return TransformedTargetRegressor(regressor=pipeline,
+                                          func=np.log, inverse_func=np.exp)
+    return TransformedTargetRegressor(regressor=pipeline)
+\end{lstlisting}
+
+\subsection{Unsupervised feature engineering}
+K-Means~\citep{lloyd1982} was applied to the standardised model year and mileage to discover vehicle age and usage segments. Each listing's cluster membership was one-hot encoded and added as model features. Because the inertia curve has no sharp elbow, $k$ was chosen on the training set by the silhouette score~\citep{rousseeuw1987}, which peaked at $k=3$ (0.462; Figure~\ref{fig:kmeans}). The clusters are interpretable. The first holds recent, low-mileage cars (median year 2021, 73,000 km, 1.03M EGP). The second holds older, high-mileage cars (2011, 227,750 km, 460,000 EGP). The third holds very old cars (1999, 210,000 EGP), 28\% of which are listed with zero mileage, which suggests that the mileage was not recorded rather than genuinely zero. The clustering was implemented as a custom transformer, so it is also fitted inside each CV fold.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\linewidth]{kmeans_selection.png}
+\caption{Choosing $k$: inertia (left), silhouette score (centre), and the resulting segments (right).}
+\label{fig:kmeans}
+\end{figure}
+
+\subsection{Supervised models and target transformation}
+Four regressors were compared: multiple linear regression (OLS), Ridge regression~\citep{hoerl1970}, a CART decision tree~\citep{breiman1984}, and a random forest~\citep{breiman2001}. Because price is strongly right-skewed, each model was first cross-validated with default hyperparameters on both raw price and $\log(\text{price})$. Log-scale predictions were back-transformed with $\exp$, so all metrics are in EGP (Table~\ref{tab:baseline}).
+
+\begin{table}[H]
+\centering
+\caption{Baseline 5-fold CV MAE (EGP) for each target; the lower value was kept.}
+\label{tab:baseline}
+\begin{tabular}{lrrl}
+\toprule
+Model & Raw price & Log price & Target kept \\
+\midrule
+Linear regression & 290,860 & 178,930 & log \\
+Ridge ($\alpha=1$) & 301,194 & 187,381 & log \\
+Decision tree & 212,014 & 214,476 & raw \\
+Random forest & 181,414 & 184,413 & raw \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The log target reduced the linear models' MAE by 38\%. Car prices behave multiplicatively (each year of age or a premium brand changes price by a percentage, not a fixed amount), and a linear model can only express that on the log scale. The tree models already capture non-linear effects through their splits, so for them the log target changed MAE by less than 2\%, and they were kept on raw price.
+
+\section{Hyperparameter Tuning}
+Each model was tuned on its chosen target using the same five folds, and the configuration with the lowest CV MAE was refitted on the full training set (Table~\ref{tab:tuning}). Ridge and the decision tree are cheap to fit, so exhaustive grid search was used. The random forest used randomised search, which explores wide spaces more efficiently~\citep{bergstra2012}.
+
+\begin{table}[H]
+\centering
+\small
+\caption{Search spaces, selected hyperparameters, and CV MAE (EGP) before and after tuning.}
+\label{tab:tuning}
+\begin{tabular}{>{\raggedright\arraybackslash}p{2.1cm}>{\raggedright\arraybackslash}p{5.6cm}>{\raggedright\arraybackslash}p{3.3cm}r}
+\toprule
+Model & Search space & Selected & CV MAE \\
+\midrule
+Ridge & Grid: 25 log-spaced $\alpha \in [10^{-3}, 10^{3}]$ & $\alpha=0.056$ & 187,381 $\rightarrow$ 178,218 \\
+Decision tree & Grid (90): max\_depth $\{5,\dots,25,\text{None}\}$, min\_samples\_split $\{2,10,20\}$, min\_samples\_leaf $\{1,2,5,10,20\}$ & depth None, split 10, leaf 1 & 212,014 $\rightarrow$ 209,486 \\
+Random forest & Random (60 draws): n\_estimators 100--500, max\_depth $\{10,\dots,40,\text{None}\}$, min\_samples\_split $\{2,5,10\}$, min\_samples\_leaf $\{1,2,4,8\}$, max\_features $\{\text{sqrt},0.3,0.5,1.0\}$ & 330 trees, depth None, split 5, leaf 1, all features & 181,414 $\rightarrow$ 180,815 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\linewidth]{tuning_curves.png}
+\caption{Training and validation MAE against Ridge $\alpha$ (left) and decision-tree depth (right).}
+\label{fig:tuning}
+\end{figure}
+
+Ridge gained the most from tuning (4.9\%). Its validation MAE is flat for $\alpha \le 0.1$ and rises steeply beyond $\alpha=1$ (Figure~\ref{fig:tuning}), so the default $\alpha=1$ over-shrank the coefficients of the roughly 1,000 one-hot columns. The decision tree's validation MAE fell steadily with depth, while its training MAE approached zero. The best tree is therefore fully grown and limited only by min\_samples\_split, and its large gap between training and CV MAE (84,171 vs.\ 209,486 EGP) shows that it still overfits. An initial 25-draw randomised search for the random forest failed to beat the defaults, so the budget was raised to 60 draws. Even then, the gain was only 0.3\%, which indicates that the default forest was already close to optimal for this data.
+
+\section{Results Analysis}
+\subsection{Contribution of the K-Means features}
+Each tuned model was cross-validated again without the cluster columns, using identical folds (Table~\ref{tab:ablation}). The clusters lowered MAE only for the decision tree (1.1\%), and they slightly worsened the linear models. They were therefore kept only in the tree. Because the clusters are a coarse function of year and mileage, which every model already receives directly, they add little new information. The single tree benefits most because the cluster columns offer it ready-made age and usage splits.
+
+\begin{table}[H]
+\centering
+\caption{K-Means ablation: CV MAE (EGP) with and without the cluster features.}
+\label{tab:ablation}
+\begin{tabular}{lrrr}
+\toprule
+Model & With clusters & Without & Change \\
+\midrule
+Linear regression & 178,930 & 178,425 & +0.28\% \\
+Ridge (tuned) & 178,218 & 177,579 & +0.36\% \\
+Decision tree (tuned) & 209,486 & 211,785 & $-$1.09\% \\
+Random forest (tuned) & 180,815 & 180,800 & +0.01\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Test-set performance}
+\begin{table}[H]
+\centering
+\caption{Final configurations on the held-out test set (2,898 listings).}
+\label{tab:test}
+\begin{tabular}{lrrrrr}
+\toprule
+Model & MAE & RMSE & $R^2$ & MAPE & CV MAE \\
+\midrule
+Ridge (tuned, log) & 168,068 & 603,839 & 0.848 & 14.6\% & \textbf{177,579} \\
+Linear regression (log) & 169,030 & 596,636 & 0.852 & 14.9\% & 178,425 \\
+Random forest (tuned) & \textbf{159,927} & 560,160 & 0.870 & 14.9\% & 180,800 \\
+Decision tree (tuned) & 179,020 & 553,190 & 0.873 & 17.2\% & 209,486 \\
+Median-price baseline & 749,911 & 1,615,693 & $-$0.085 & 92.1\% & -- \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+All four models reduce MAE by a factor of 4.2--4.7 compared with predicting the median price (Table~\ref{tab:test}). Tuned Ridge has the lowest CV MAE and is therefore the selected model. The random forest achieved the lowest test MAE. However, the gaps between the two (3,200 EGP in CV and 8,100 EGP on test) are both smaller than the fold-to-fold standard deviation of about 10,000 EGP, so neither model is clearly better. Choosing the forest because of its test score would also bias the reported estimate~\citep{cawley2010}.
+
+The metrics also disagree in a systematic way. The log-target linear models have the best MAE and MAPE but the worst RMSE, and the raw-target trees show the reverse. Exponentiating a predicted log-mean returns roughly the conditional median, which systematically under-predicts expensive cars~\citep{duan1983}. This is visible as points below the diagonal above $10^{7}$ EGP in Figure~\ref{fig:pred-actual}, and these few large errors dominate RMSE. By price band, every model is least accurate for the cheapest fifth of cars ($\le$340,000 EGP: 24.5\% MAPE for Ridge), where condition matters more than specification, and most accurate between 580,000 and 825,000 EGP (9.9\%).
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.85\linewidth]{predicted_vs_actual.png}
+\caption{Predicted against actual test-set prices (log scales).}
+\label{fig:pred-actual}
+\end{figure}
+
+Permutation importance on the selected model (Figure~\ref{fig:importance}) shows that brand, year, and model dominate the predictions. Shuffling them raises MAE by 575,490, 368,321, and 315,841 EGP respectively. Mileage adds only 18,652 EGP, consistent with its overlap with year and its unreliable zero entries, and governorate contributes almost nothing.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.75\linewidth]{permutation_importance.png}
+\caption{Permutation importance of each input column for tuned Ridge on the test set.}
+\label{fig:importance}
+\end{figure}
+
+Tuned Ridge on log price is recommended. It has the best CV MAE and the lowest MAPE, and it is fast and interpretable. Where large errors on luxury cars are costly, the random forest is the better alternative, given its substantially lower RMSE.
+
 \clearpage
-\begin{thebibliography}{9}
+\begin{thebibliography}{99}
 \phantomsection
 \addcontentsline{toc}{section}{References}
 \bibitem{project-repository}
 GitHub link: \url{https://github.com/yassienE4/MachineLearningCW}
+
+\bibitem{bergstra2012}
+Bergstra, J. and Bengio, Y. (2012) `Random search for hyper-parameter optimization', \emph{Journal of Machine Learning Research}, 13, pp.~281--305.
+
+\bibitem{breiman1984}
+Breiman, L., Friedman, J.H., Olshen, R.A. and Stone, C.J. (1984) \emph{Classification and Regression Trees}. Belmont, CA: Wadsworth.
+
+\bibitem{breiman2001}
+Breiman, L. (2001) `Random forests', \emph{Machine Learning}, 45(1), pp.~5--32.
+
+\bibitem{cawley2010}
+Cawley, G.C. and Talbot, N.L.C. (2010) `On over-fitting in model selection and subsequent selection bias in performance evaluation', \emph{Journal of Machine Learning Research}, 11, pp.~2079--2107.
+
+\bibitem{duan1983}
+Duan, N. (1983) `Smearing estimate: a nonparametric retransformation method', \emph{Journal of the American Statistical Association}, 78(383), pp.~605--610.
+
+\bibitem{hoerl1970}
+Hoerl, A.E. and Kennard, R.W. (1970) `Ridge regression: biased estimation for nonorthogonal problems', \emph{Technometrics}, 12(1), pp.~55--67.
+
+\bibitem{kohavi1995}
+Kohavi, R. (1995) `A study of cross-validation and bootstrap for accuracy estimation and model selection', \emph{Proceedings of the 14th International Joint Conference on Artificial Intelligence (IJCAI)}, pp.~1137--1145.
+
+\bibitem{lloyd1982}
+Lloyd, S. (1982) `Least squares quantization in PCM', \emph{IEEE Transactions on Information Theory}, 28(2), pp.~129--137.
+
+\bibitem{pedregosa2011}
+Pedregosa, F. et al. (2011) `Scikit-learn: machine learning in Python', \emph{Journal of Machine Learning Research}, 12, pp.~2825--2830.
+
+\bibitem{rousseeuw1987}
+Rousseeuw, P.J. (1987) `Silhouettes: a graphical aid to the interpretation and validation of cluster analysis', \emph{Journal of Computational and Applied Mathematics}, 20, pp.~53--65.
 \end{thebibliography}
